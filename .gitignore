@@ -1,2 +1,10 @@
-.idea
+.DS_Store
+Thumbs.db
+*.log
+.godot/
+.import/
+export_presets.cfg
+android/
+.idea/
+.vscode/
 .cursor

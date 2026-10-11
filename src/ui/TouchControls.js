@@ -1,10 +1,11 @@
 import { GAME_WIDTH, GAME_HEIGHT } from "../config.js";
+import { markAsUI } from "../util/setupZoomCameras.js";
 
 export class TouchControls {
   constructor(scene, player) {
     this.scene = scene;
     this.player = player;
-    this.root = scene.add.container(0, 0).setScrollFactor(0).setDepth(110);
+    this.root = markAsUI(scene.add.container(0, 0).setScrollFactor(0).setDepth(110));
 
     const alpha = 0.35;
     const baseY = GAME_HEIGHT - 110;

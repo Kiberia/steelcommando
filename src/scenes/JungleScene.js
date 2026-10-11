@@ -1,13 +1,15 @@
 import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
   LEVEL_WIDTH,
   LEVEL_HEIGHT,
   HEALTH_PICKUP,
   GRENADE_DAMAGE,
   GRENADE_PICKUP,
+  EXPLOSION_SCALE,
   ENEMY_DROP_CHANCE,
   PLAYER_WEAPON_DROP_CHANCE,
+  PROJECTILE_SCALE,
+  ROCKET_SCALE,
+  GRENADE_SCALE,
 } from "../config.js";
 import { WEAPONS, PICKUP_TO_WEAPON, WEAPON_TO_PICKUP } from "../weapons/WeaponDefs.js";
 import { GameState } from "../state/GameState.js";
@@ -18,6 +20,7 @@ import { HeliBoss } from "../entities/HeliBoss.js";
 import { HUD } from "../ui/HUD.js";
 import { TouchControls } from "../ui/TouchControls.js";
 import { ContinueOverlay } from "../ui/ContinueOverlay.js";
+import { setupZoomCameras } from "../util/setupZoomCameras.js";
 
 export class JungleScene extends Phaser.Scene {
   constructor() {
@@ -31,7 +34,7 @@ export class JungleScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, LEVEL_WIDTH, LEVEL_HEIGHT);
     this.cameras.main.setBounds(0, 0, LEVEL_WIDTH, LEVEL_HEIGHT);
-    this.cameras.main.setBackgroundColor("#4aa3ff");
+    this.cameras.main.setBackgroundColor("#aedecb");
 
     this.buildWorld();
     this.setupGroups();
@@ -39,9 +42,6 @@ export class JungleScene extends Phaser.Scene {
     const st = GameState.get();
     this.player = new Player(this, st.checkpointX, st.checkpointY);
     this.physics.add.collider(this.player, this.ground);
-
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
-    this.cameras.main.setDeadzone(80, 60);
 
     this.hud = new HUD(this);
     this.touch = new TouchControls(this, this.player);
@@ -60,21 +60,12 @@ export class JungleScene extends Phaser.Scene {
     this.events.on("boss-hp", (ratio) => this.hud.setBossHp(ratio));
 
     this.spawnLevelContent();
+    // After world + UI exist — no display-list hooks (those froze boot)
+    setupZoomCameras(this, { follow: this.player });
   }
 
   buildWorld() {
-    // Solid sky + light parallax band
-    this.add.rectangle(LEVEL_WIDTH / 2, LEVEL_HEIGHT / 2, LEVEL_WIDTH, LEVEL_HEIGHT, 0x4aa3ff).setDepth(-30);
-    this.add.rectangle(LEVEL_WIDTH / 2, 120, LEVEL_WIDTH, 240, 0x6bb6ff).setScrollFactor(0.2).setDepth(-25);
-
-    for (let i = 0; i < 40; i++) {
-      const x = 100 + i * 240 + Phaser.Math.Between(-40, 40);
-      this.add.image(x, LEVEL_HEIGHT - 140 - Phaser.Math.Between(0, 40), "palm")
-        .setScrollFactor(0.4)
-        .setAlpha(0.7)
-        .setDepth(-10)
-        .setScale(Phaser.Math.FloatBetween(1.1, 1.8));
-    }
+    this.buildParallaxBackground();
 
     this.ground = this.physics.add.staticGroup();
     const tileW = 64;
@@ -98,6 +89,28 @@ export class JungleScene extends Phaser.Scene {
 
     // Foreground dirt strip decoration
     this.add.rectangle(LEVEL_WIDTH / 2, LEVEL_HEIGHT - 10, LEVEL_WIDTH, 20, 0x3d8b3d).setDepth(5);
+  }
+
+  buildParallaxBackground() {
+    // plx-1 (far) → plx-5 (near); BootScene 4× upscales source before this
+    const layers = [
+      { key: "plx-1", factor: 0.05, depth: -50 },
+      { key: "plx-2", factor: 0.2, depth: -45 },
+      { key: "plx-3", factor: 0.35, depth: -40 },
+      { key: "plx-4", factor: 0.5, depth: -35 },
+      { key: "plx-5", factor: 0.7, depth: -30 },
+    ];
+    const srcH = this.textures.get("plx-1").getSourceImage().height;
+    const tileScale = LEVEL_HEIGHT / srcH;
+
+    layers.forEach(({ key, factor, depth }) => {
+      const layer = this.add
+        .tileSprite(0, 0, LEVEL_WIDTH, LEVEL_HEIGHT, key)
+        .setOrigin(0, 0)
+        .setScrollFactor(factor, 0)
+        .setDepth(depth);
+      layer.setTileScale(tileScale);
+    });
   }
 
   setupGroups() {
@@ -154,12 +167,14 @@ export class JungleScene extends Phaser.Scene {
   spawnInfantry(x, y) {
     const e = new Infantry(this, x, y);
     this.enemies.add(e);
+    this.ignoreUiCam?.(e);
     return e;
   }
 
   spawnTurret(x, y) {
     const e = new Turret(this, x, y);
     this.enemies.add(e);
+    this.ignoreUiCam?.(e);
     return e;
   }
 
@@ -188,6 +203,8 @@ export class JungleScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(7);
     p.setData("label", label);
+    this.ignoreUiCam?.(p);
+    this.ignoreUiCam?.(label);
     return p;
   }
 
@@ -209,44 +226,57 @@ export class JungleScene extends Phaser.Scene {
 
   spawnBullet(x, y, angle, def) {
     const b = this.playerBullets.create(x, y, "bullet");
+    b.setScale(PROJECTILE_SCALE);
     b.body.setAllowGravity(false);
     b.setDepth(15);
     b.setData("damage", def.damage);
     b.setData("life", 1200);
     this.physics.velocityFromRotation(angle, def.bulletSpeed, b.body.velocity);
-    b.rotation = angle;
+    // Art points left; +PI aligns tip with travel direction
+    b.rotation = angle + Math.PI;
+    this.ignoreUiCam?.(b);
   }
 
   spawnRocket(x, y, angle, def) {
     const r = this.rockets.create(x, y, "rocket");
+    r.setScale(ROCKET_SCALE);
     r.body.setAllowGravity(false);
     r.setDepth(15);
     r.setData("damage", def.damage);
     r.setData("blast", def.blastRadius || 96);
     this.physics.velocityFromRotation(angle, def.bulletSpeed, r.body.velocity);
+    // Art points right; tip already aligns with travel direction
     r.rotation = angle;
+    this.ignoreUiCam?.(r);
   }
 
   spawnEnemyBullet(x, y, angle, damage) {
     const b = this.enemyBullets.create(x, y, "bullet");
+    b.setScale(PROJECTILE_SCALE);
     b.setTint(0xff6666);
     b.body.setAllowGravity(false);
     b.setDepth(14);
     b.setData("damage", damage);
     this.physics.velocityFromRotation(angle, 380, b.body.velocity);
+    b.rotation = angle + Math.PI;
+    this.ignoreUiCam?.(b);
   }
 
   spawnGrenade(x, y, facing) {
     const g = this.grenades.create(x, y, "grenade");
+    g.setScale(GRENADE_SCALE);
     g.setDepth(14);
-    g.setBounce(0.35);
-    g.setVelocity(facing * 320, -360);
+    g.setBounce(0.12);
+    g.setDrag(80, 0);
+    g.setVelocity(facing * 240, -300);
     g.setData("fuse", 1200);
     g.setData("damage", GRENADE_DAMAGE);
+    this.ignoreUiCam?.(g);
   }
 
   spawnMuzzleFlash(x, y) {
     const f = this.add.circle(x, y, 6, 0xffee88, 0.9).setDepth(16);
+    this.ignoreUiCam?.(f);
     this.tweens.add({
       targets: f,
       alpha: 0,
@@ -256,6 +286,7 @@ export class JungleScene extends Phaser.Scene {
     });
     for (let i = 0; i < 3; i++) {
       const p = this.add.image(x, y, "particle").setDepth(16);
+      this.ignoreUiCam?.(p);
       this.tweens.add({
         targets: p,
         x: x + Phaser.Math.Between(-20, 20),
@@ -268,15 +299,29 @@ export class JungleScene extends Phaser.Scene {
   }
 
   spawnExplosion(x, y) {
-    const e = this.add.image(x, y, "explosion").setDepth(20).setScale(0.5);
+    const e = this.add.sprite(x, y, "explosion").setDepth(20).setScale(EXPLOSION_SCALE);
+    e.setAngle(Phaser.Math.Between(0, 359));
+    this.ignoreUiCam?.(e);
     this.cameras.main.shake(120, 0.008);
-    this.tweens.add({
-      targets: e,
-      scale: 1.6,
-      alpha: 0,
-      duration: 280,
-      onComplete: () => e.destroy(),
-    });
+    e.play("explosion-burst");
+    e.once("animationcomplete-explosion-burst", () => e.destroy());
+  }
+
+  /** Soft hit puff — no fireball (reserved for grenades/rockets/vehicles). */
+  spawnEnemyDeathFx(x, y) {
+    for (let i = 0; i < 5; i++) {
+      const p = this.add.image(x, y, "particle").setDepth(16).setTint(0xccaa66);
+      this.ignoreUiCam?.(p);
+      this.tweens.add({
+        targets: p,
+        x: x + Phaser.Math.Between(-28, 28),
+        y: y + Phaser.Math.Between(-36, 8),
+        alpha: 0,
+        scale: 0.4,
+        duration: 220,
+        onComplete: () => p.destroy(),
+      });
+    }
   }
 
   blastAt(x, y, radius, damage, fromRocket = false) {
@@ -368,7 +413,7 @@ export class JungleScene extends Phaser.Scene {
 
   onEnemyKilled(enemy) {
     GameState.addScore(enemy.scoreValue || 100);
-    this.spawnExplosion(enemy.x, enemy.y - 10);
+    this.spawnEnemyDeathFx(enemy.x, enemy.y - 10);
     if (Phaser.Math.Between(1, 100) <= ENEMY_DROP_CHANCE) {
       const roll = Phaser.Math.Between(1, 100);
       let type = "H";
@@ -411,6 +456,7 @@ export class JungleScene extends Phaser.Scene {
     this.hud.setBossHp(1);
     const boss = new HeliBoss(this, this.player.x + 280, 180);
     this.enemies.add(boss);
+    this.ignoreUiCam?.(boss);
     this.cameras.main.flash(400, 255, 200, 80);
   }
 
@@ -418,17 +464,19 @@ export class JungleScene extends Phaser.Scene {
     this.hud.update();
     this.trySpawnBoss();
 
+    const view = this.cameras.main.worldView;
+
     // Cull old player bullets
     this.playerBullets.getChildren().forEach((b) => {
       let life = b.getData("life") - delta;
       b.setData("life", life);
-      if (life <= 0 || b.x < this.cameras.main.scrollX - 40 || b.x > this.cameras.main.scrollX + GAME_WIDTH + 40) {
+      if (life <= 0 || b.x < view.x - 40 || b.x > view.right + 40) {
         b.destroy();
       }
     });
 
     this.enemyBullets.getChildren().forEach((b) => {
-      if (b.x < this.cameras.main.scrollX - 80 || b.x > this.cameras.main.scrollX + GAME_WIDTH + 80 || b.y > LEVEL_HEIGHT) {
+      if (b.x < view.x - 80 || b.x > view.right + 80 || b.y > LEVEL_HEIGHT) {
         b.destroy();
       }
     });

@@ -1,17 +1,39 @@
-import { PLAYER_SPEED, PLAYER_JUMP, PLAYER_MAX_HP } from "../config.js";
+import {
+  PLAYER_SPEED,
+  PLAYER_JUMP,
+  PLAYER_MAX_HP,
+  PLAYER_DISPLAY_HEIGHT,
+  PLAYER_IDLE_FRAME_W,
+  PLAYER_IDLE_FRAME_H,
+} from "../config.js";
 import { WEAPONS } from "../weapons/WeaponDefs.js";
 import { GameState } from "../state/GameState.js";
 
 export class Player extends Phaser.Physics.Arcade.Sprite {
   constructor(scene, x, y) {
-    super(scene, x, y, "player");
+    super(scene, x, y, "player_idle", 0);
     scene.add.existing(this);
     scene.physics.add.existing(this);
 
     this.setCollideWorldBounds(true);
-    this.body.setSize(28, 48);
-    this.body.setOffset(4, 4);
+
+    // Scale hi-res frames down for play; LINEAR softens the downscale (source PNGs untouched)
+    if (this.texture) {
+      this.texture.setFilter(Phaser.Textures.FilterMode.LINEAR);
+    }
+    const scale = PLAYER_DISPLAY_HEIGHT / PLAYER_IDLE_FRAME_H;
+    this.setScale(scale);
+
+    // Hitbox in source-texture pixels (Arcade scales it with the sprite)
+    const bodyW = Math.round(PLAYER_IDLE_FRAME_W * 0.38);
+    const bodyH = Math.round(PLAYER_IDLE_FRAME_H * 0.62);
+    this.body.setSize(bodyW, bodyH);
+    this.body.setOffset(
+      Math.round((PLAYER_IDLE_FRAME_W - bodyW) / 2),
+      Math.round(PLAYER_IDLE_FRAME_H - bodyH - PLAYER_IDLE_FRAME_H * 0.04)
+    );
     this.setDepth(10);
+    this.play("player-idle");
 
     this.facing = 1;
     this.aim = 0; // -1 up, 0 forward
@@ -77,10 +99,6 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     const onFloor = this.body.blocked.down || this.body.touching.down;
 
-    this.setTexture("player");
-    this.body.setSize(28, 48);
-    this.body.setOffset(4, 4);
-
     if (left) {
       this.setVelocityX(-PLAYER_SPEED);
       this.facing = -1;
@@ -93,6 +111,27 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.setFlipX(this.facing < 0);
     this.aim = up ? -1 : 0;
+
+    const moving = left || right;
+    if (onFloor && moving) {
+      if (this.anims.currentAnim?.key !== "player-walk") {
+        this.play("player-walk");
+      } else if (this.anims.isPaused) {
+        this.anims.resume();
+      } else if (!this.anims.isPlaying) {
+        this.play("player-walk");
+      }
+    } else if (onFloor && !moving) {
+      if (this.anims.currentAnim?.key !== "player-idle") {
+        this.play("player-idle");
+      } else if (this.anims.isPaused) {
+        this.anims.resume();
+      } else if (!this.anims.isPlaying) {
+        this.play("player-idle");
+      }
+    } else if (this.anims.isPlaying) {
+      this.anims.pause();
+    }
 
     if (jumpPressed && onFloor) {
       this.setVelocityY(PLAYER_JUMP);
@@ -112,11 +151,12 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   muzzle() {
     const { x: ax, y: ay } = this.getAimVector();
-    const ox = 20;
-    const oy = this.aim < 0 ? -22 : -8;
+    const h = this.displayHeight;
+    const ox = h * 0.28;
+    const oy = this.aim < 0 ? -h * 0.28 : -h * 0.06;
     return {
-      x: this.x + ax * ox + (this.facing > 0 ? 8 : -8),
-      y: this.y + oy + ay * 6,
+      x: this.x + ax * ox + (this.facing > 0 ? h * 0.12 : -h * 0.12),
+      y: this.y + oy + ay * (h * 0.08),
     };
   }
 

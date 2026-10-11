@@ -1,10 +1,11 @@
 import { GAME_WIDTH, GAME_HEIGHT, CONTINUE_SECONDS } from "../config.js";
 import { GameState } from "../state/GameState.js";
+import { markAsUI } from "../util/setupZoomCameras.js";
 
 export class ContinueOverlay {
   constructor(scene) {
     this.scene = scene;
-    this.root = scene.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false);
+    this.root = markAsUI(scene.add.container(0, 0).setScrollFactor(0).setDepth(200).setVisible(false));
     this.timer = CONTINUE_SECONDS;
     this.active = false;
     this.tick = null;

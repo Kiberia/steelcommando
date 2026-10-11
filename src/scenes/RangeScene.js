@@ -1,11 +1,13 @@
 import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
   HEALTH_PICKUP,
   GRENADE_DAMAGE,
   GRENADE_PICKUP,
+  EXPLOSION_SCALE,
   ENEMY_DROP_CHANCE,
   PLAYER_WEAPON_DROP_CHANCE,
+  PROJECTILE_SCALE,
+  ROCKET_SCALE,
+  GRENADE_SCALE,
 } from "../config.js";
 import { WEAPONS, PICKUP_TO_WEAPON, WEAPON_TO_PICKUP } from "../weapons/WeaponDefs.js";
 import { GameState } from "../state/GameState.js";
@@ -13,6 +15,7 @@ import { Player } from "../entities/Player.js";
 import { Infantry } from "../entities/Infantry.js";
 import { HUD } from "../ui/HUD.js";
 import { TouchControls } from "../ui/TouchControls.js";
+import { setupZoomCameras, markAsUI } from "../util/setupZoomCameras.js";
 
 const RANGE_W = 2800;
 const RANGE_H = 720;
@@ -41,7 +44,6 @@ export class RangeScene extends Phaser.Scene {
 
     this.player = new Player(this, 120, 500);
     this.physics.add.collider(this.player, this.ground);
-    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
 
     this.hud = new HUD(this);
     this.touch = new TouchControls(this, this.player);
@@ -59,13 +61,17 @@ export class RangeScene extends Phaser.Scene {
     this.placeWeaponRack();
     this.spawnDummies();
 
-    this.add.text(24, 96, "WEAPON RANGE  ·  ESC = menu", {
-      fontFamily: "Courier New",
-      fontSize: "18px",
-      color: "#ffffff",
-      stroke: "#000000",
-      strokeThickness: 4,
-    }).setScrollFactor(0).setDepth(100);
+    markAsUI(
+      this.add.text(24, 96, "WEAPON RANGE  ·  ESC = menu", {
+        fontFamily: "Courier New",
+        fontSize: "18px",
+        color: "#ffffff",
+        stroke: "#000000",
+        strokeThickness: 4,
+      }).setScrollFactor(0).setDepth(100)
+    );
+
+    setupZoomCameras(this, { follow: this.player });
 
     this.input.keyboard.on("keydown-ESC", () => this.scene.start("Menu"));
   }
@@ -128,11 +134,12 @@ export class RangeScene extends Phaser.Scene {
 
   spawnDummy(x) {
     const e = new Infantry(this, x, 500);
-    e.setTexture("dummy");
+    e.usePlaceholder("dummy");
     e.hp = 40;
     e.scoreValue = 10;
     e.setData("spawnX", x);
     this.enemies.add(e);
+    this.ignoreUiCam?.(e);
     return e;
   }
 
@@ -164,6 +171,8 @@ export class RangeScene extends Phaser.Scene {
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(7);
     p.setData("label", label);
+    this.ignoreUiCam?.(p);
+    this.ignoreUiCam?.(label);
     return p;
   }
 
@@ -185,44 +194,57 @@ export class RangeScene extends Phaser.Scene {
 
   spawnBullet(x, y, angle, def) {
     const b = this.playerBullets.create(x, y, "bullet");
+    b.setScale(PROJECTILE_SCALE);
     b.body.setAllowGravity(false);
     b.setDepth(15);
     b.setData("damage", def.damage);
     b.setData("life", 1200);
     this.physics.velocityFromRotation(angle, def.bulletSpeed, b.body.velocity);
-    b.rotation = angle;
+    // Art points left; +PI aligns tip with travel direction
+    b.rotation = angle + Math.PI;
+    this.ignoreUiCam?.(b);
   }
 
   spawnRocket(x, y, angle, def) {
     const r = this.rockets.create(x, y, "rocket");
+    r.setScale(ROCKET_SCALE);
     r.body.setAllowGravity(false);
     r.setDepth(15);
     r.setData("damage", def.damage);
     r.setData("blast", def.blastRadius || 96);
     this.physics.velocityFromRotation(angle, def.bulletSpeed, r.body.velocity);
+    // Art points right; tip already aligns with travel direction
     r.rotation = angle;
+    this.ignoreUiCam?.(r);
   }
 
   spawnEnemyBullet(x, y, angle, damage) {
     const b = this.enemyBullets.create(x, y, "bullet");
+    b.setScale(PROJECTILE_SCALE);
     b.setTint(0xff6666);
     b.body.setAllowGravity(false);
     b.setDepth(14);
     b.setData("damage", damage);
     this.physics.velocityFromRotation(angle, 320, b.body.velocity);
+    b.rotation = angle + Math.PI;
+    this.ignoreUiCam?.(b);
   }
 
   spawnGrenade(x, y, facing) {
     const g = this.grenades.create(x, y, "grenade");
+    g.setScale(GRENADE_SCALE);
     g.setDepth(14);
-    g.setBounce(0.35);
-    g.setVelocity(facing * 320, -360);
+    g.setBounce(0.12);
+    g.setDrag(80, 0);
+    g.setVelocity(facing * 240, -300);
     g.setData("fuse", 1200);
     g.setData("damage", GRENADE_DAMAGE);
+    this.ignoreUiCam?.(g);
   }
 
   spawnMuzzleFlash(x, y) {
     const f = this.add.circle(x, y, 6, 0xffee88, 0.9).setDepth(16);
+    this.ignoreUiCam?.(f);
     this.tweens.add({
       targets: f,
       alpha: 0,
@@ -233,15 +255,29 @@ export class RangeScene extends Phaser.Scene {
   }
 
   spawnExplosion(x, y) {
-    const e = this.add.image(x, y, "explosion").setDepth(20).setScale(0.5);
+    const e = this.add.sprite(x, y, "explosion").setDepth(20).setScale(EXPLOSION_SCALE);
+    e.setAngle(Phaser.Math.Between(0, 359));
+    this.ignoreUiCam?.(e);
     this.cameras.main.shake(100, 0.006);
-    this.tweens.add({
-      targets: e,
-      scale: 1.6,
-      alpha: 0,
-      duration: 280,
-      onComplete: () => e.destroy(),
-    });
+    e.play("explosion-burst");
+    e.once("animationcomplete-explosion-burst", () => e.destroy());
+  }
+
+  /** Soft hit puff — no fireball (reserved for grenades/rockets/vehicles). */
+  spawnEnemyDeathFx(x, y) {
+    for (let i = 0; i < 5; i++) {
+      const p = this.add.image(x, y, "particle").setDepth(16).setTint(0xccaa66);
+      this.ignoreUiCam?.(p);
+      this.tweens.add({
+        targets: p,
+        x: x + Phaser.Math.Between(-28, 28),
+        y: y + Phaser.Math.Between(-36, 8),
+        alpha: 0,
+        scale: 0.4,
+        duration: 220,
+        onComplete: () => p.destroy(),
+      });
+    }
   }
 
   blastAt(x, y, radius, damage) {
@@ -325,7 +361,7 @@ export class RangeScene extends Phaser.Scene {
 
   onEnemyKilled(enemy) {
     GameState.addScore(enemy.scoreValue || 10);
-    this.spawnExplosion(enemy.x, enemy.y - 10);
+    this.spawnEnemyDeathFx(enemy.x, enemy.y - 10);
     const spawnX = enemy.getData("spawnX") || enemy.x;
 
     if (Phaser.Math.Between(1, 100) <= ENEMY_DROP_CHANCE) {

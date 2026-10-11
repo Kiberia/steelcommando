@@ -11,7 +11,7 @@ const config = {
   parent: "game-container",
   width: GAME_WIDTH,
   height: GAME_HEIGHT,
-  backgroundColor: "#4aa3ff",
+  backgroundColor: "#aedecb",
   physics: {
     default: "arcade",
     arcade: {
@@ -23,6 +23,11 @@ const config = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
+  render: {
+    pixelArt: true,
+    antialias: false,
+    roundPixels: true,
+  },
   scene: [BootScene, MenuScene, JungleScene, RangeScene, WinScene, GameOverScene],
   input: {
     activePointers: 3,
@@ -30,4 +35,4 @@ const config = {
 };
 
 // eslint-disable-next-line no-new
-new Phaser.Game(config);
+window.game = new Phaser.Game(config);

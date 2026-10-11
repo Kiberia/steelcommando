@@ -1,11 +1,12 @@
 import { GAME_WIDTH, PLAYER_MAX_HP } from "../config.js";
 import { WEAPONS } from "../weapons/WeaponDefs.js";
 import { GameState } from "../state/GameState.js";
+import { markAsUI } from "../util/setupZoomCameras.js";
 
 export class HUD {
   constructor(scene) {
     this.scene = scene;
-    this.root = scene.add.container(0, 0).setScrollFactor(0).setDepth(100);
+    this.root = markAsUI(scene.add.container(0, 0).setScrollFactor(0).setDepth(100));
 
     this.scoreText = scene.add.text(24, 16, "SCORE 0", {
       fontFamily: "Courier New",
@@ -23,13 +24,13 @@ export class HUD {
       strokeThickness: 4,
     }).setOrigin(1, 0);
 
-    this.weaponText = scene.add.text(GAME_WIDTH - 24, 42, "PISTOL", {
+    this.weaponText = scene.add.text(GAME_WIDTH - 24, 42, "", {
       fontFamily: "Courier New",
       fontSize: "16px",
       color: "#ffdd66",
       stroke: "#000000",
       strokeThickness: 3,
-    }).setOrigin(1, 0);
+    }).setOrigin(1, 0).setVisible(false);
 
     this.livesText = scene.add.text(24, 42, "LIVES 3", {
       fontFamily: "Courier New",
@@ -71,10 +72,13 @@ export class HUD {
   update() {
     const st = GameState.get();
     const def = WEAPONS[st.weaponId] || WEAPONS.pistol;
+    const isPistol = st.weaponId === "pistol";
     this.scoreText.setText(`SCORE ${st.score}`);
     this.livesText.setText(`LIVES ${st.lives}`);
-    this.weaponText.setText(def.label);
-    this.ammoText.setText(st.ammo === Infinity ? `AMMO ∞  G ${st.grenades}` : `AMMO ${st.ammo}  G ${st.grenades}`);
+    // Default handgun is always available — only show special weapons
+    this.weaponText.setVisible(!isPistol);
+    this.weaponText.setText(isPistol ? "" : def.label);
+    this.ammoText.setText(isPistol ? `G ${st.grenades}` : `AMMO ${st.ammo}  G ${st.grenades}`);
     this.hpFill.width = Math.max(0, 316 * (st.hp / PLAYER_MAX_HP));
     const r = st.hp / PLAYER_MAX_HP;
     this.hpFill.fillColor = r > 0.5 ? 0xe63900 : r > 0.25 ? 0xff8800 : 0xff2222;
